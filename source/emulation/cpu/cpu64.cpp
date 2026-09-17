@@ -5285,8 +5285,14 @@ unhandled:
         int pid = (thread && thread->process) ? (int)thread->process->id : -1;
         U64 rsp = reg[X64_RSP].u64;
         const char* exe = (thread && thread->process) ? thread->process->exe.c_str() : "?";
-        klog_fmt("  UNIMPLCTX pid=%d exe='%s' rip=0x%llx rsp=0x%llx",
-                 pid, exe, (unsigned long long)ipStart, (unsigned long long)rsp);
+        U64 stk0 = 0, preQ = 0;
+        if (memory) {
+            stk0 = memory->readq(rsp); // return address of whoever got us here
+            if (ipStart >= 8) preQ = memory->readq(ipStart - 8);
+        }
+        klog_fmt("  UNIMPLCTX pid=%d exe='%s' rip=0x%llx rsp=0x%llx stk0=0x%llx rip-8=0x%llx",
+                 pid, exe, (unsigned long long)ipStart, (unsigned long long)rsp,
+                 (unsigned long long)stk0, (unsigned long long)preQ);
     }
     if (std::getenv("BW64_UNIMPLDUMP")) {
         int pid = (thread && thread->process) ? (int)thread->process->id : -1;
