@@ -3221,7 +3221,7 @@ int runX64SelfTest() {
             0x66, 0x48, 0x0F, 0x7E, 0xC0,                                  // movq rax, xmm0
         };
         runAndCheck(r, "cvtpd2ps {3.0, 4.0} -> {3.0f, 4.0f}", withExit(code), [](CPU64& c) {
-            return c.reg[X64_R15].u64 == 0x408000003F800000ULL;
+            return c.reg[X64_R15].u64 == 0x4080000040400000ULL;
         });
     }
 
