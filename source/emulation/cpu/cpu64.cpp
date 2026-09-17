@@ -787,7 +787,7 @@ U32 CPU64::step() {
         case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47: case 0x48: 
         case 0x49: case 0x4a: case 0x4b: case 0x4c: case 0x4d: case 0x4e: case 0x4f: case 0x60: 
         case 0x61: case 0x62: case 0x64: case 0x65: case 0x66: case 0x67: case 0x6c: case 0x6d: 
-        case 0x6e: case 0x6f: case 0x82: case 0x9a: case 0xac: case 0xad: case 0xc2: case 0xc4: 
+        case 0x6e: case 0x6f: case 0x82: case 0x9a: case 0xac: case 0xad: case 0xc4: 
         case 0xc5: case 0xc8: case 0xca: case 0xcb: case 0xcd: case 0xce: case 0xd4: case 0xd5: 
         case 0xd6: case 0xe0: case 0xe1: case 0xe2: case 0xe3: case 0xe4: case 0xe5: case 0xe6: 
         case 0xe7: case 0xea: case 0xec: case 0xed: case 0xee: case 0xef: case 0xf0: case 0xf1: 
@@ -1349,6 +1349,19 @@ dsp_26:
     if (op == 0xC3) {
         rip = pop64();
         return opOff + 1;
+    }
+
+    // RET imm16 (C2 iw) — near return, then discard imm16 bytes of stack
+    // arguments. In 64-bit mode the popped address is always 64-bit and the
+    // immediate is 16-bit (REX.W / 0x66 have no effect on either). Hit in the
+    // wild in Stardew Valley startup (RIP in a 64-bit PE image); without it
+    // the thread faults and the game never gets past process init.
+    if (op == 0xC2) {
+        U16 imm = (U16)(fetchByte(rip + opOff + 1) |
+                        ((U16)fetchByte(rip + opOff + 2) << 8));
+        rip = pop64();
+        reg[X64_RSP].u64 += imm;
+        return opOff + 3;
     }
 
     // IRETQ (REX.W CF == 48 CF), and the non-promoted IRET (CF) / IRETD.

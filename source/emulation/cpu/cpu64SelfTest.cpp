@@ -194,6 +194,28 @@ int runX64SelfTest() {
         });
     }
 
+    // Test 6b: ret imm16 (C2 iw). callee-cleanup return: pops the return
+    // address, then discards imm16 bytes of stack arguments. Initial
+    // RSP = STACK_TOP-16; call pushes 8 (-> -24); ret 8 pops addr (-> -16)
+    // and drops 8 more (-> -8).
+    //   offset 0:  EB 08            jmp +8 (over func)
+    //   offset 2:  48 C7 C0 77...   mov rax, 0x77    (func body, 7 bytes)
+    //   offset 9:  C2 08 00         ret 8            (func end)
+    //   offset C:  E8 F1 FF FF FF   call rel32 = -15 → target = 0x11 + -15 = 2 ✓
+    //   offset 11: (withExit appends here)
+    {
+        std::vector<U8> code = {
+            0xEB, 0x08,
+            0x48, 0xC7, 0xC0, 0x77, 0x00, 0x00, 0x00,
+            0xC2, 0x08, 0x00,
+            0xE8, 0xF1, 0xFF, 0xFF, 0xFF,
+        };
+        runAndCheck(r, "ret imm16", withExit(code), [](CPU64& c) {
+            return c.reg[X64_R15].u64 == 0x77 &&
+                c.reg[X64_RSP].u64 == (U64)(STACK_TOP - 8);
+        });
+    }
+
     // IRETQ (48 CF). Wine's PE-side ntdll returns from its user-mode exception
     // dispatcher with iretq. Build a long-mode interrupt frame on the stack
     // (pushed high-to-low: SS, RSP, RFLAGS, CS, RIP) and execute iretq; it must
