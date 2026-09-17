@@ -4441,6 +4441,25 @@ dsp_54:
             return used;
         }
 
+        // CVTPD2PS xmm, xmm/m128   66 0F 5A /r — narrow 2× double to 2× float
+        // in the low qword, zeroing the upper qword. Rounding follows MXCSR;
+        // we use the host round-to-nearest (the mode everything runs in).
+        if (op2 == 0x5A && osize66 && p.rep == 0) {
+            ModRM m = decodeModRM(rip + opOff + 2, p, 0);
+            U64 sLo, sHi;
+            if (m.isReg) { sLo = xmm[m.rmIndex].lo; sHi = xmm[m.rmIndex].hi; }
+            else { sLo = memory->readq(m.effAddr); sHi = memory->readq(m.effAddr + 8); }
+            double d0, d1;
+            std::memcpy(&d0, &sLo, 8);
+            std::memcpy(&d1, &sHi, 8);
+            float f0 = (float)d0, f1 = (float)d1;
+            xmm[m.regField].lo = ((U64)floatToU32(f0)) | (((U64)floatToU32(f1)) << 32);
+            xmm[m.regField].hi = 0;
+            U32 used = opOff + 2 + m.length;
+            rip += used;
+            return used;
+        }
+
         // CVTSS2SI  r32/r64, xmm/m32  F3 0F 2D /r
         // CVTTSS2SI r32/r64, xmm/m32  F3 0F 2C /r  — truncating variant
         // Same rationale as F2 0x2C: compilers prefer the truncating form

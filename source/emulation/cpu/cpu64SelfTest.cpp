@@ -3208,6 +3208,23 @@ int runX64SelfTest() {
         });
     }
 
+    // Test 87c — CVTPD2PS: {3.0, 4.0} doubles → lo = 3.0f|4.0f<<32
+    // (0x408000003F800000). Staged via cvtsi2sd + unpcklpd (Test 85 idiom).
+    {
+        std::vector<U8> code = {
+            0x48, 0xC7, 0xC0, 0x03, 0x00, 0x00, 0x00,                      // mov rax, 3
+            0xF2, 0x48, 0x0F, 0x2A, 0xC0,                                  // cvtsi2sd xmm0, rax
+            0x48, 0xC7, 0xC0, 0x04, 0x00, 0x00, 0x00,                      // mov rax, 4
+            0xF2, 0x48, 0x0F, 0x2A, 0xC8,                                  // cvtsi2sd xmm1, rax
+            0x66, 0x0F, 0x14, 0xC1,                                        // unpcklpd xmm0, xmm1
+            0x66, 0x0F, 0x5A, 0xC0,                                        // cvtpd2ps xmm0, xmm0
+            0x66, 0x48, 0x0F, 0x7E, 0xC0,                                  // movq rax, xmm0
+        };
+        runAndCheck(r, "cvtpd2ps {3.0, 4.0} -> {3.0f, 4.0f}", withExit(code), [](CPU64& c) {
+            return c.reg[X64_R15].u64 == 0x408000003F800000ULL;
+        });
+    }
+
     // Test 88 — MOVNTI: store rax (0xDEADBEEFCAFEBABE) to [rsp-8], then load
     // it back to r15 to verify. We bias on the stack pointer using a small
     // negative disp so we don't have to manage rsp explicitly.
