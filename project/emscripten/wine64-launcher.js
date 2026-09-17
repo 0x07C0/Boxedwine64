@@ -52,6 +52,15 @@
 //   wine64.html?boot=1               -> wineboot --init   (stalls; roadmap probe)
 //   wine64.html?p=glcube.exe         -> wine64 glcube.exe  (pre-booted prefix; GL)
 //   wine64.html?p=notepad.exe        -> wine64 notepad.exe (pre-booted prefix)
+//   wine64.html?game=foo.zip&p=/game/foo.exe
+//                                -> mount foo.zip LAZILY from its URL as a
+//                                   fourth overlay (same bw64url mechanism as
+//                                   wine64.zip: 512KB Range blocks, nothing
+//                                   fetched up front) and run the program
+//                                   from it. Implies the pre-booted prefix.
+//                                   This is how multi-GB payloads fit the WASM
+//                                   heap: only touched blocks are fetched.
+//                                   Quote paths with spaces: ?p="/game/a b.exe"
 //
 // PERSISTENT WINE SESSION (the real "load a new app into the SAME running wine"):
 // By default (?session=1, implied whenever a real program is requested) the boot
@@ -120,6 +129,13 @@
     // remains as the runner monitor).
     var LAZY = param("lazy") !== "0";
     var wineZipArg = "wine64.zip"; // replaced by a bw64url: spec in lazy mode
+    // Fork (heap-wall): optional fourth overlay mounted lazily from its URL.
+    // ?game=<zipname> is resolved to a bw64url: spec exactly like wine64.zip
+    // (HEAD for Content-Length, chunked-manifest fallback) and appended as
+    // the TOPMOST -zip layer, so game files shadow everything else. The game
+    // zip itself is never fetched eagerly (see neededZips).
+    var GAME_ZIP = param("game");
+    var gameZipArg = null;
 
     // --- current run configuration ------------------------------------------
     // These describe the run being booted RIGHT NOW. The bare-page defaults come
@@ -132,7 +148,9 @@
         NOVIDEO = !!opts.novideo;
         // Run a real program against the pre-booted prefix when a program (other
         // than the bare --version correctness boot) is named and we're not booting.
-        USE_PREFIX = !DO_BOOT && PROG && PROG.length && PROG !== "--version";
+        // A ?game= payload implies the prefix too: games run from it.
+        USE_PREFIX = (!DO_BOOT && PROG && PROG.length && PROG !== "--version") ||
+            (!DO_BOOT && !!GAME_ZIP);
         // PERSISTENT SESSION mode: instead of booting `wine64 <prog>` (which makes
         // the whole emulator quit when <prog> exits), boot a long-lived foreground
         // wineserver and then spawn each app INTO that running kernel via the
@@ -192,9 +210,29 @@
     }
 
     // argv for running a Windows/guest program under wine64: [wine64, tok, ...].
+    // Quote-aware: ?p="/game/a b.exe -arg" keeps the spaced path one token.
+    function splitProgArgs(s) {
+        var out = [], cur = "", quote = null;
+        s = s || "";
+        for (var i = 0; i < s.length; i++) {
+            var c = s[i];
+            if (quote) {
+                if (c === quote) quote = null;
+                else cur += c;
+            } else if (c === '"' || c === "'") {
+                quote = c;
+            } else if (/\s/.test(c)) {
+                if (cur.length) { out.push(cur); cur = ""; }
+            } else {
+                cur += c;
+            }
+        }
+        if (cur.length) out.push(cur);
+        return out;
+    }
     function wineProgArgv(prog) {
         var argv = [WINE64];
-        (prog || "").split(/\s+/).forEach(function (tok) { if (tok.length) argv.push(tok); });
+        splitProgArgs(prog).forEach(function (tok) { argv.push(tok); });
         return argv;
     }
 
@@ -204,6 +242,9 @@
         // The pre-booted prefix is a third overlay; mount it only when we'll use
         // it, so the bare --version / ?boot=1 paths stay byte-for-byte unchanged.
         if (USE_PREFIX) args.push("-zip", PREFIX_ZIP);
+        // Fork (heap-wall): the lazy game payload is the topmost layer, mounted
+        // only when requested, so untested paths never see it.
+        if (gameZipArg) args.push("-zip", gameZipArg);
         if (NOVIDEO) args.push("-novideo");
 
         if (DO_BOOT) {
@@ -240,8 +281,8 @@
             args.push("-env", "WINESERVER=" + WINESERVER64);
             args.push(WINE64);
             var prog = (PROG && PROG.length) ? PROG : "--version";
-            prog.split(/\s+/).forEach(function (tok) {
-                if (tok.length) args.push(tok);
+            splitProgArgs(prog).forEach(function (tok) {
+                args.push(tok);
             });
         }
         return args;
@@ -421,10 +462,15 @@
     // Prefer the whole-file URL (local server, Range-capable); fall back to the
     // split parts via the manifest (GitHub Pages). URLs are absolutized because
     // the sync XHR runs on pthread workers whose base URL is not the page's.
-    function resolveLazyWineSpec() {
-        if (!LAZY) return Promise.resolve();
+    // Resolve a bw64url: spec for any zip served next to the page:
+    //   bw64url:<total>;<absUrl>|<size>;...
+    // Whole-file via HEAD (local Range-capable server), chunked-manifest
+    // fallback (split deploys). Generalized from the wine64.zip-only version
+    // so ?game= payloads mount with the identical mechanism.
+    function resolveLazySpec(zipName) {
+        if (!LAZY) return Promise.resolve(null);
         var abs = function (u) { return new URL(u, window.location.href).href; };
-        var wholeUrl = BASE + WINE_ZIP;
+        var wholeUrl = BASE + zipName;
         var probe = CHUNKED ? Promise.reject(new Error("chunked")) :
             fetch(wholeUrl, { method: "HEAD" }).then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
@@ -433,7 +479,7 @@
                 return "bw64url:" + len + ";" + abs(wholeUrl) + "|" + len;
             });
         return probe.catch(function () {
-            return fetch(BASE + WINE_ZIP + ".manifest.json", { cache: "no-cache" })
+            return fetch(BASE + zipName + ".manifest.json", { cache: "no-cache" })
                 .then(function (r) { return r.json(); })
                 .then(function (mf) {
                     var spec = "bw64url:" + mf.totalBytes;
@@ -445,9 +491,22 @@
                     }
                     return spec;
                 });
-        }).then(function (spec) {
+        });
+    }
+    function resolveLazyWineSpec() {
+        if (!LAZY) return Promise.resolve();
+        return resolveLazySpec(WINE_ZIP).then(function (spec) {
             wineZipArg = spec;
             console.log("lazy rootfs: wine64.zip will mount on demand (" + spec.split(";").length + " field(s))");
+        });
+    }
+    // Fork (heap-wall): resolve the game payload spec the same way. Game zip
+    // is never fetched eagerly — only its Content-Length via HEAD.
+    function resolveLazyGameSpec() {
+        if (!LAZY || !GAME_ZIP) return Promise.resolve();
+        return resolveLazySpec(GAME_ZIP).then(function (spec) {
+            gameZipArg = spec;
+            console.log("lazy game: " + GAME_ZIP + " will mount on demand");
         });
     }
     // One progress line for the whole concurrent download set: sum the per-URL
@@ -757,6 +816,9 @@
             })
             .then(function () {
                 return resolveLazyWineSpec(); // no-op unless ?lazy=1
+            })
+            .then(function () {
+                return resolveLazyGameSpec(); // no-op unless ?game=<zip>
             })
             .then(function () {
                 // Restore persisted user files into the writable MEMFS layer
