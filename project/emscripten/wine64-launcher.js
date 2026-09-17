@@ -202,6 +202,11 @@
         // (?session=0) path so we can see loaddll/d3d failures. Remove before ship.
         var wd = param("winedbg");
         if (wd) e.push("WINEDEBUG=" + wd);
+        // Fork (heap-wall): ?env=VAR=val passthrough (repeat with %3B separators
+        // for several, e.g. ?env=FOO%3D1%3BBAR%3D2). Same reload-path scope as
+        // ?winedbg above; use ?session=0 so the program spawn sees it.
+        var ev = param("env");
+        if (ev) ev.split(";").forEach(function (kv) { if (kv) e.push(kv); });
         return e;
         // NOTE: WINEDEBUG added here does NOT reach in-session app spawns — those
         // use the CAPTURED BOOT env (g_sessionCtx.env in wine64session.cpp), not
