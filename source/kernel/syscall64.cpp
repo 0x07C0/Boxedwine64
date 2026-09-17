@@ -153,6 +153,7 @@
 #define X64_SYS_clock_nanosleep   230
 #define X64_SYS_nanosleep         35
 #define X64_SYS_rseq              334
+#define X64_SYS_getcpu            309
 #define X64_SYS_clone3            435
 #define X64_SYS_eventfd2          290
 #define X64_SYS_epoll_create1     291
@@ -2806,6 +2807,7 @@ static const char* x64SyscallName(U64 nr) {
         case 291: return "epoll_create1";
         case 293: return "pipe2";
         case 302: return "prlimit64";
+        case 309: return "getcpu";
         case 318: return "getrandom";
         case 334: return "rseq";
         case 435: return "clone3";
@@ -4287,6 +4289,16 @@ void ksyscall64(CPU64* cpu) {
             // every thread start. Pretend it's not supported so glibc falls
             // back to plain mutexes.
             ret = (U64)-K_ENOSYS;
+            break;
+        case X64_SYS_getcpu:
+            // getcpu(cpu*, node*, tcache*) — topology probe. Single vCPU
+            // guest: cpu=0, node=0, success. Previously -ENOSYS, which some
+            // callers (glibc malloc, .NET GC) RETRY in a hot loop — 161
+            // identical lines at the Stardew stall, each also spamming the
+            // browser #output log. Success return stops both.
+            if (a1) cpu->memory->writed(a1, 0);
+            if (a2) cpu->memory->writed(a2, 0);
+            ret = 0;
             break;
         case X64_SYS_exit:
             ret = sys_exit64(cpu, a1, false);

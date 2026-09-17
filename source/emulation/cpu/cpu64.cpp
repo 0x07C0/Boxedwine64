@@ -5277,9 +5277,17 @@ unhandled:
              fetchByte(ipStart + 6),
              p.rex, (int)p.osize16, (int)p.asize32, p.seg, p.rep);
     // BW64_UNIMPLDUMP: when a thread decodes a bogus opcode it has almost always
-    // jumped to a garbage address (corruption / bad control transfer). Dump the
-    // pid + GPRs + the top of the stack so we can see WHO called into here and
-    // whether RIP/RSP are sane. Env-gated; off by default.
+    // jumped to a garbage address (corruption / bad control transfer). The
+    // pid/exe/RSP line is ALWAYS printed (getenv can't reach in-tab runs, and
+    // the faulting context is what distinguishes a missing opcode from a bad
+    // branch); the full register + stack dump stays behind the env gate.
+    {
+        int pid = (thread && thread->process) ? (int)thread->process->id : -1;
+        U64 rsp = reg[X64_RSP].u64;
+        const char* exe = (thread && thread->process) ? thread->process->exe.c_str() : "?";
+        klog_fmt("  UNIMPLCTX pid=%d exe='%s' rip=0x%llx rsp=0x%llx",
+                 pid, exe, (unsigned long long)ipStart, (unsigned long long)rsp);
+    }
     if (std::getenv("BW64_UNIMPLDUMP")) {
         int pid = (thread && thread->process) ? (int)thread->process->id : -1;
         U64 rsp = reg[X64_RSP].u64;

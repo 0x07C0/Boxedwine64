@@ -1375,6 +1375,29 @@ int runX64SelfTest() {
             return c.reg[X64_R15].u64 == 3;
         });
     }
+    // Test 54b — getcpu(309) writes cpu=node=0 and returns 0. Uses one
+    // stack slot for both out-params ([rsp-8] is inside the mapped stack
+    // page: initial RSP is STACK_TOP-16). r15 accumulates ret+cpu+node and
+    // must stay 0; the process then exits with it.
+    {
+        std::vector<U8> code = {
+            0x48, 0x8D, 0x7C, 0x24, 0xF8,                            // lea rdi, [rsp-8]
+            0x48, 0x8D, 0x74, 0x24, 0xF8,                            // lea rsi, [rsp-8]
+            0x48, 0xC7, 0xC0, 0x35, 0x01, 0x00, 0x00,                // mov rax, 309
+            0x0F, 0x05,                                                // syscall (getcpu)
+            0x49, 0x89, 0xC7,                                         // mov r15, rax (ret)
+            0x8B, 0x07,                                                // mov eax, [rdi] (cpu)
+            0x4C, 0x01, 0xC7,                                         // add r15, rax
+            0x8B, 0x06,                                                // mov eax, [rsi] (node)
+            0x4C, 0x01, 0xC7,                                         // add r15, rax
+            0x4C, 0x89, 0xFF,                                         // mov rdi, r15 (exit status)
+            0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00,                // mov rax, 60
+            0x0F, 0x05,                                                // syscall (exit)
+        };
+        runAndCheck(r, "getcpu writes 0,0 returns 0", code, [](CPU64& c) {
+            return c.reg[X64_R15].u64 == 0;
+        });
+    }
     // Test 55 — applyRelativeRelocations end-to-end.
     // Models a relocated module loaded at LOAD_RELOC. Lays out a 4-entry
     // dynamic array (RELA, RELASZ, RELAENT, NULL) and a 3-entry RELA table
