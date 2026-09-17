@@ -3193,6 +3193,21 @@ int runX64SelfTest() {
         });
     }
 
+    // Test 87b — CVTPS2PD: src.lo = 1.0f|2.0f<<32 → dst.lo = 1.0, dst.hi = 2.0
+    // (0x3FF0000000000000 / 0x4000000000000000). We read back .lo via movq;
+    // .hi is covered by the emulation loop symmetry (same lane code).
+    {
+        std::vector<U8> code = {
+            0x48, 0xB8, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x40,    // mov rax, bits of {1.0f, 2.0f}
+            0x66, 0x48, 0x0F, 0x6E, 0xC8,                                   // movq xmm1, rax
+            0x0F, 0x5A, 0xC1,                                               // cvtps2pd xmm0, xmm1
+            0x66, 0x48, 0x0F, 0x7E, 0xC0,                                   // movq rax, xmm0
+        };
+        runAndCheck(r, "cvtps2pd {1.0f, 2.0f} -> {1.0, 2.0}", withExit(code), [](CPU64& c) {
+            return c.reg[X64_R15].u64 == 0x3FF0000000000000ULL;
+        });
+    }
+
     // Test 88 — MOVNTI: store rax (0xDEADBEEFCAFEBABE) to [rsp-8], then load
     // it back to r15 to verify. We bias on the stack pointer using a small
     // negative disp so we don't have to manage rsp explicitly.

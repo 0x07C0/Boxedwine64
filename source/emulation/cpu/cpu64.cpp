@@ -4424,6 +4424,23 @@ dsp_54:
             return used;
         }
 
+        // CVTPS2PD xmm, xmm/m64   0F 5A /r (no prefix) — widen low 2× float
+        // to 2× double (dst.lo = double(src[31:0]), dst.hi = double(src[63:32])).
+        // Stardew Valley (MonoGame math) hits this right after DLL load.
+        if (op2 == 0x5A && !osize66 && p.rep == 0) {
+            ModRM m = decodeModRM(rip + opOff + 2, p, 0);
+            U64 sLo = m.isReg ? xmm[m.rmIndex].lo : memory->readq(m.effAddr);
+            float f0, f1;
+            U32 b0 = (U32)sLo, b1 = (U32)(sLo >> 32);
+            std::memcpy(&f0, &b0, 4);
+            std::memcpy(&f1, &b1, 4);
+            xmm[m.regField].lo = doubleToU64((double)f0);
+            xmm[m.regField].hi = doubleToU64((double)f1);
+            U32 used = opOff + 2 + m.length;
+            rip += used;
+            return used;
+        }
+
         // CVTSS2SI  r32/r64, xmm/m32  F3 0F 2D /r
         // CVTTSS2SI r32/r64, xmm/m32  F3 0F 2C /r  — truncating variant
         // Same rationale as F2 0x2C: compilers prefer the truncating form
