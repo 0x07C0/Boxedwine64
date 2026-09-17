@@ -216,6 +216,18 @@ int runX64SelfTest() {
         });
     }
 
+    // PREFETCH (0F 0D /r): cache hint, architectural NOP. Must not fault and
+    // must not disturb registers. 0F 0D 08 = PREFETCHW [rax].
+    {
+        std::vector<U8> code = {
+            0x48, 0xB8, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x0F, 0x0D, 0x08,
+        };
+        runAndCheck(r, "prefetchw nop", withExit(code), [](CPU64& c) {
+            return c.reg[X64_R15].u64 == CODE_BASE;
+        });
+    }
+
     // IRETQ (48 CF). Wine's PE-side ntdll returns from its user-mode exception
     // dispatcher with iretq. Build a long-mode interrupt frame on the stack
     // (pushed high-to-low: SS, RSP, RFLAGS, CS, RIP) and execute iretq; it must

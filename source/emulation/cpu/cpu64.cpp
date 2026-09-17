@@ -1834,6 +1834,16 @@ dsp_37:
     // Jcc rel32 (0F 80-8F). Same condition encoding.
     if (op == 0x0F) {
         U8 op2 = fetchByte(rip + opOff + 1);
+        // 0F 0D /r — PREFETCH(m8), PREFETCHW, PREFETCHWT1. Pure cache hints:
+        // architecturally NOPs (never fault, no observable state). Decode the
+        // ModR/M for length only; don't touch memory. Seen in Stardew Valley
+        // startup (MSVC emits prefetches in string/memory routines).
+        if (op2 == 0x0D) {
+            ModRM m = decodeModRM(rip + opOff + 2, p, 0);
+            U32 used = opOff + 2 + m.length;
+            rip += used;
+            return used;
+        }
         if (op2 >= 0x80 && op2 <= 0x8F) {
             S32 disp = (S32)fetchDword(rip + opOff + 2);
             U32 used = opOff + 2 + 4;
